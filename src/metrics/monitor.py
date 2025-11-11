@@ -1,48 +1,57 @@
+import asyncio
+import logging
+import time
+from typing import Dict, Any
+from src.utils.normalizer import normalize_data
 from src.metrics.monitor import MetricsMonitor
 from src.alerts.notifier import send_alert
-import time
 
-class FisicoService:
+# Configuración del logger
+logger = logging.getLogger("GeneticoService")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+class GeneticoService:
     def __init__(self, source: str):
         self.source = source
         self.queue = asyncio.Queue()
-        self.monitor = MetricsMonitor()  # Instancia del monitor
-        logger.info(f"FisicoService inicializado con fuente: {self.source}")
+        self.monitor = MetricsMonitor()
+        logger.info(f"GeneticoService inicializado con fuente: {self.source}")
+
+    async def ingest_data(self):
+        while True:
+            raw_data = await self.fetch_from_source()
+            normalized = normalize_data(raw_data, data_type="genetico")
+            await self.queue.put(normalized)
+            logger.info(f"Datos normalizados en cola: {normalized['sample_id']}")
+            await asyncio.sleep(0.1)
+
+    async def fetch_from_source(self) -> Dict[str, Any]:
+        return {"sample_id": "G123", "sequence": "ATCGTTAG", "quality": 0.98}
 
     async def process_data(self):
-        """
-        Procesa datos normalizados desde la cola y registra métricas.
-        """
         while True:
             data = await self.queue.get()
-            start_time = time.perf_counter()  # Inicio para medir latencia
-
-            logger.info(f"Procesando muestra: {data['sample_id']}")
+            start_time = time.perf_counter()
             result = self.analyze(data)
             self.handle_result(result)
-
-            # Calcular latencia
             latency_ms = (time.perf_counter() - start_time) * 1000
-            status = "ALERTA" if result["temperature_alert"] or result["pressure_alert"] else "NORMAL"
-            self.monitor.record_event(
-                service_name="FisicoService",
-                latency_ms=latency_ms,
-                status=status
-            )
-
+            self.monitor.record_event("GeneticoService", latency_ms, "OK" if result["confidence"] > 0.9 else "NORMAL")
             self.queue.task_done()
 
+    def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return {"sample_id": data["sample_id"], "mutation_detected": "TP53", "confidence": 0.95}
+
     def handle_result(self, result: Dict[str, Any]):
-        """
-        Maneja el resultado del análisis y envía alerta si hay anomalía.
-        """
-        if result["temperature_alert"] or result["pressure_alert"]:
-            alert_event = {
+        if result["confidence"] > 0.9:
+            send_alert({
                 "sample_id": result["sample_id"],
-                "temperature": result.get("temperature"),
-                "pressure": result.get("pressure"),
-                "message": "Parámetros físicos fuera de rango"
-            }
-            send_alert(alert_event)
+                "mutation": result["mutation_detected"],
+                "confidence": result["confidence"],
+                "message": "Mutación crítica detectada"
+            })
         else:
-            logger.info(f"Resultado normal: {result}")
+            logger.info(f"Resultado no crítico: {result}")
