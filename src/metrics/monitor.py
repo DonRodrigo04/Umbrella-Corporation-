@@ -55,3 +55,14 @@ class GeneticoService:
             })
         else:
             logger.info(f"Resultado no crítico: {result}")
+    class MetricsMonitor:
+    def __init__(self):
+        self.records = []
+
+    def log_event(self, service_name: str, latency: float, status: str):
+        self.records.append({"service": service_name, "latency": latency, "status": status})
+
+    def to_dataframe(self):
+        import pandas as pd
+        return pd.DataFrame(self.records)
+    
